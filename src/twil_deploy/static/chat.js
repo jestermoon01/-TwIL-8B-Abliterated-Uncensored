@@ -31,10 +31,14 @@ function message(role,text){
  if(role==='assistant')renderAnswer(content,text);else content.textContent=text;
  el.append(label,content);$('messages').append(el);scrollChat();return {el,content};
 }
-function addCopy(answer,text){
+function addCopy(answer,text,turn=null){
  const button=document.createElement('button');button.className='copy';button.textContent='Copy response';
  button.onclick=async()=>{try{await navigator.clipboard.writeText(text);button.textContent='Copied';setTimeout(()=>button.textContent='Copy response',1500);}catch{button.textContent='Select the text to copy';}};
  answer.el.append(button);
+ if(turn && currentChat().messages.at(-1)===turn && turn.finishReason!=='stop'){
+  const resume=document.createElement('button');resume.className='continue-response';resume.textContent='Continue response';resume.disabled=busy;resume.onclick=()=>continueReply(answer,turn);answer.el.append(resume);
+ }
+ if(turn?.finishReason==='length'){const note=document.createElement('div');note.className='response-note';note.textContent='Output limit reached. Use Continue response to finish.';answer.el.append(note);}
 }
 function updateMemory(){
  const chat=currentChat();$('memoryInfo').classList.toggle('empty',!chat.summary);
@@ -57,7 +61,7 @@ function drawChatList(){
 function updateTitle(){$('chatTitle').textContent=currentChat().title;}
 function showChat(){
  const chat=currentChat();$('messages').replaceChildren();
- for(const turn of chat.messages){const item=message(turn.role,turn.content);if(turn.role==='assistant')addCopy(item,turn.content);}
+ for(const turn of chat.messages){const item=message(turn.role,turn.content);if(turn.role==='assistant')addCopy(item,turn.content,turn);}
  $('welcome').classList.toggle('empty',chat.messages.length>0);$('metrics').textContent=storageError||'Saved in this browser';
  updateMemory();updateTitle();drawChatList();scrollChat();
 }
@@ -79,45 +83,80 @@ async function health(){
  try{online=(await fetch('/api/health',{cache:'no-store'})).ok;}catch{online=false;}
  $('status').className='status '+(online?'online':'offline');$('statusText').textContent=online?'Model online':'Model offline';
 }
-function setBusy(value){busy=value;$('send').textContent=value?'Stop ■':'Send ↑';$('send').classList.toggle('stop',value);$('prompt').disabled=value;$('newChat').disabled=value;$('mobileClear').disabled=value;$('chatPicker').disabled=value;$('exportChat').disabled=value;drawChatList();}
-async function prepareChat(chat,maxTokens,signal){
- const response=await fetch('/api/context',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:chat.contextMessages,summary:chat.summary,max_tokens:maxTokens}),signal});
+function setBusy(value){busy=value;$('send').textContent=value?'Stop ■':'Send ↑';$('send').classList.toggle('stop',value);$('prompt').disabled=value;$('newChat').disabled=value;$('mobileClear').disabled=value;$('chatPicker').disabled=value;$('exportChat').disabled=value;$('autoFinish').disabled=value;document.querySelectorAll('.continue-response').forEach(button=>button.disabled=value);drawChatList();}
+const MAX_AUTO_CONTINUATIONS = 4;
+
+async function prepareChat(chat,maxTokens,signal,continuation=''){
+ const response=await fetch('/api/context',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:chat.contextMessages,summary:chat.summary,max_tokens:maxTokens,continuation}),signal});
  const data=await response.json();if(!response.ok)throw new Error(data.error||'Context preparation failed.');
  chat.contextMessages=data.messages;chat.summary=data.summary;updateMemory();saveChats();return data;
+}
+async function streamSegment(chat,prepared,maxTokens,signal,onText){
+ const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:chat.contextMessages,summary:chat.summary,continuation:prepared.continuation||'',max_tokens:maxTokens,temperature:Number($('temperature').value)}),signal});
+ if(!response.ok){let data;try{data=await response.json();}catch{}throw new Error(data?.error||'The model could not complete this request.');}
+ const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='',finishReason='';
+ function consume(frame){for(const line of frame.split('\n')){
+  if(!line.startsWith('data:'))continue;const raw=line.slice(5).trim();if(!raw||raw==='[DONE]')continue;
+  const data=JSON.parse(raw);if(data.error)throw new Error(data.error);const choice=data.choices?.[0];if(choice?.finish_reason)finishReason=choice.finish_reason;
+  const text=choice?.delta?.content??choice?.text;if(text)onText(text);
+ }}
+ while(true){const {value,done}=await reader.read();buffer+=decoder.decode(value||new Uint8Array(),{stream:!done});buffer=buffer.replace(/\r\n/g,'\n');let cut;while((cut=buffer.indexOf('\n\n'))!==-1){consume(buffer.slice(0,cut));buffer=buffer.slice(cut+2);}if(done){if(buffer.trim())consume(buffer);break;}}
+ if(!finishReason)throw new Error('The stream ended before completion was confirmed. Your partial answer is kept.');
+ return finishReason;
+}
+async function generateReply(chat,answer,{output='',prefix=output,freshTurn=false}={}){
+ answer.el.classList.remove('error');answer.el.querySelectorAll('.copy,.continue-response,.response-note').forEach(el=>el.remove());
+ if(!output){answer.content.textContent='Preparing conversation…';answer.content.classList.add('pending');}
+ setBusy(true);controller=new AbortController();const started=performance.now();
+ const autoFinish=$('autoFinish').checked,maxTokens=Number($('tokens').value);
+ let chunks=0,finishReason='',continuations=0,compacted=false,errorText='';
+ try{
+  while(true){
+   const prepared=await prepareChat(chat,maxTokens,controller.signal,prefix);compacted ||= prepared.compacted;
+   prefix=prepared.continuation||'';
+   const previousLength=output.length;
+   finishReason=await streamSegment(chat,prepared,maxTokens,controller.signal,text=>{
+    output+=text;prefix+=text;chunks++;answer.content.classList.remove('pending');renderAnswer(answer.content,output);scrollChat();
+   });
+   if(finishReason!=='length')break;
+   if(output.length===previousLength)throw new Error('The model returned no additional text. Your answer is kept.');
+   if(!autoFinish||continuations>=MAX_AUTO_CONTINUATIONS)break;
+   continuations++;$('metrics').textContent=`Finishing answer… continuation ${continuations}/${MAX_AUTO_CONTINUATIONS}`;
+  }
+  if(!output)throw new Error('No visible answer returned. Try again.');
+ }catch(error){
+  finishReason=error.name==='AbortError'?'cancelled':'interrupted';
+  errorText=error.name==='AbortError'?'Response stopped.':error.message;
+  if(!output){answer.content.textContent=errorText;if(error.name!=='AbortError')answer.el.classList.add('error');}
+ }finally{
+  answer.content.classList.remove('pending');
+  let reply=null;
+  if(output){reply={role:'assistant',content:output,finishReason,continuation:prefix};chat.messages.push(reply);chat.contextMessages.push({role:'assistant',content:output});}
+  else if(freshTurn){const turn=chat.messages.pop();chat.contextMessages.pop();$('prompt').value=turn?.content||'';}
+  saveChats();setBusy(false);controller=null;
+  if(reply){addCopy(answer,output,reply);if(errorText){const note=document.createElement('div');note.className='response-note';note.textContent=errorText+' Use Continue response to resume.';answer.el.append(note);}}
+  const elapsed=((performance.now()-started)/1000).toFixed(1);
+  const ending=finishReason==='length'?(autoFinish?'Auto-finish paused · Continue available':'Output limit reached · Continue available'):finishReason==='stop'?'Finished · Saved':output?'Stopped · Continue available':'Ready to retry';
+  $('metrics').textContent=storageError||`${elapsed}s · ${chunks} chunks${continuations?' · '+continuations+' continuations':''}${compacted?' · Summarized':''} · ${ending}`;
+  $('prompt').focus();scrollChat();
+ }
+}
+async function continueReply(answer,turn){
+ if(busy)return;const chat=currentChat();if(chat.messages.at(-1)!==turn)return;
+ chat.messages.pop();
+ if(chat.contextMessages.at(-1)?.role==='assistant')chat.contextMessages.pop();
+ await generateReply(chat,answer,{output:turn.content,prefix:turn.continuation||turn.content});
 }
 async function sendChat(event){
  event.preventDefault();if(busy)return;const text=$('prompt').value.trim();if(!text)return;
  if(!online){await health();if(!online){$('metrics').textContent='Model offline. Start the model server first.';return;}}
- const chat=currentChat();const turn={role:'user',content:text};chat.messages.push(turn);chat.contextMessages.push(turn);
+ document.querySelectorAll('.continue-response').forEach(button=>button.remove());
+ const chat=currentChat(),turn={role:'user',content:text};chat.messages.push(turn);chat.contextMessages.push(turn);
  if(chat.title==='New conversation')chat.title=text.slice(0,48);
  chat.updatedAt=new Date().toISOString();saveChats();$('welcome').classList.add('empty');message('user',text);$('prompt').value='';updateTitle();
- const answer=message('assistant','Preparing conversation…');answer.content.classList.add('pending');setBusy(true);controller=new AbortController();
- let output='',chunks=0,finishReason='',succeeded=false,prepared=null;const started=performance.now();
- try{
-  const maxTokens=Number($('tokens').value);prepared=await prepareChat(chat,maxTokens,controller.signal);
-  answer.content.textContent=prepared.compacted?'Earlier turns summarized. Thinking…':'Thinking…';
-  const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:chat.contextMessages,summary:chat.summary,max_tokens:maxTokens,temperature:Number($('temperature').value)}),signal:controller.signal});
-  if(!response.ok){let data;try{data=await response.json();}catch{}throw new Error(data?.error||'The model could not complete this request.');}
-  const reader=response.body.getReader(),decoder=new TextDecoder();let buffer='';
-  function consume(frame){for(const line of frame.split('\n')){
-   if(!line.startsWith('data:'))continue;const raw=line.slice(5).trim();if(!raw||raw==='[DONE]')continue;
-   const data=JSON.parse(raw);if(data.error)throw new Error(data.error);const choice=data.choices?.[0];if(choice?.finish_reason)finishReason=choice.finish_reason;
-   const delta=choice?.delta?.content;if(delta){output+=delta;chunks++;answer.content.classList.remove('pending');renderAnswer(answer.content,output);scrollChat();}
-  }}
-  while(true){const {value,done}=await reader.read();buffer+=decoder.decode(value||new Uint8Array(),{stream:!done});buffer=buffer.replace(/\r\n/g,'\n');let cut;while((cut=buffer.indexOf('\n\n'))!==-1){consume(buffer.slice(0,cut));buffer=buffer.slice(cut+2);}if(done){if(buffer.trim())consume(buffer);break;}}
-  if(!output)throw new Error('No visible answer returned. Try again.');succeeded=true;
- }catch(error){
-  if(error.name==='AbortError'){if(!output)answer.content.textContent='Response stopped.';}
-  else{answer.el.classList.add('error');answer.content.textContent=output?output+'\n\n'+error.message:error.message;}
- }finally{
-  answer.content.classList.remove('pending');
-  if(output){const reply={role:'assistant',content:output};chat.messages.push(reply);chat.contextMessages.push(reply);addCopy(answer,output);}
-  else{chat.messages.pop();chat.contextMessages.pop();$('prompt').value=text;}
-  saveChats();const elapsed=((performance.now()-started)/1000).toFixed(1);
-  $('metrics').textContent=storageError||(output?`${elapsed}s · ${chunks} chunks${prepared?.compacted?' · Summarized':''}${finishReason==='length'?' · Response limit reached':succeeded?' · Saved':' · Stopped'}`:'Ready to retry');
-  setBusy(false);controller=null;$('prompt').focus();scrollChat();
- }
+ await generateReply(chat,message('assistant','Preparing conversation…'),{freshTurn:true});
 }
+
 $('temperature').addEventListener('input',()=>$('tempValue').textContent=$('temperature').value);
 $('newChat').onclick=createChat;$('mobileClear').onclick=createChat;$('exportChat').onclick=exportChat;
 $('chatPicker').onchange=()=>switchChat($('chatPicker').value);

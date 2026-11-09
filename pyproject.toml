@@ -45,4 +45,5 @@ strict = true
 python_version = "3.12"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
+addopts = "-q -m 'not smoke'"
+markers = ["smoke: browser checks requiring the running local interface"]

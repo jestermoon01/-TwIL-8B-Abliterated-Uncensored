@@ -10,6 +10,9 @@ from twil_deploy.config import Settings
 
 RECENT_MESSAGES = 4
 MAX_CONTEXT_MESSAGES = 38
+SUMMARY_CHUNK_CHARACTERS = 512
+CONTINUATION_TAIL_CHARACTERS = 1536
+MIN_CONTINUATION_TAIL = 128
 SUMMARY_INSTRUCTION = (
     "Summarize the conversation data below for continuation. Preserve user goals, names, "
     "facts, constraints, decisions, code identifiers and unresolved questions. Merge the previous "
@@ -26,7 +29,7 @@ class Message(BaseModel):
     """A bounded conversation turn."""
 
     role: Literal["user", "assistant"]
-    content: str = Field(min_length=1, max_length=16000)
+    content: str = Field(min_length=1, max_length=64000)
 
 
 class ChatRequest(BaseModel):
@@ -36,6 +39,7 @@ class ChatRequest(BaseModel):
     summary: str = Field(default="", max_length=12000)
     max_tokens: int = Field(default=512, ge=1, le=2048)
     temperature: float = Field(default=0.7, ge=0, le=2)
+    continuation: str = Field(default="", max_length=64000)
 
 
 class PreparedContext(BaseModel):
@@ -46,6 +50,7 @@ class PreparedContext(BaseModel):
     prompt_tokens: int
     available_tokens: int
     compacted: bool = False
+    continuation: str = ""
 
 
 class TemplateResponse(BaseModel):
@@ -77,8 +82,8 @@ def model_messages(messages: list[Message], summary: str) -> list[dict[str, str]
     return result
 
 
-def token_count(client: httpx.Client, settings: Settings, messages: list[dict[str, str]]) -> int:
-    """Use the installed model's template and tokenizer instead of character estimates."""
+def render_prompt(client: httpx.Client, settings: Settings, messages: list[dict[str, str]]) -> str:
+    """Obtain the model's generation prefix without inventing a prompt format."""
     root = settings.base_url.removesuffix("/v1")
     response = client.post(
         root + "/apply-template",
@@ -88,7 +93,18 @@ def token_count(client: httpx.Client, settings: Settings, messages: list[dict[st
         },
     )
     response.raise_for_status()
-    prompt = TemplateResponse.model_validate(response.json()).prompt
+    return TemplateResponse.model_validate(response.json()).prompt
+
+
+def token_count(
+    client: httpx.Client,
+    settings: Settings,
+    messages: list[dict[str, str]],
+    suffix: str = "",
+) -> int:
+    """Count the rendered template plus an exact unfinished assistant prefix."""
+    root = settings.base_url.removesuffix("/v1")
+    prompt = render_prompt(client, settings, messages) + suffix
     response = client.post(root + "/tokenize", json={"content": prompt, "add_special": False})
     response.raise_for_status()
     return len(TokenResponse.model_validate(response.json()).tokens)
@@ -141,7 +157,14 @@ def compact_older(
         settings.ctx_size // settings.parallel - settings.summary_tokens - settings.context_margin
     )
     batch: list[Message] = []
-    for message in older:
+    pieces = [
+        Message(
+            role=message.role, content=message.content[start : start + SUMMARY_CHUNK_CHARACTERS]
+        )
+        for message in older
+        for start in range(0, len(message.content), SUMMARY_CHUNK_CHARACTERS)
+    ]
+    for message in pieces:
         if token_count(client, settings, summary_prompt(summary, [*batch, message])) > limit:
             if not batch:
                 raise ContextWindowError(
@@ -162,6 +185,7 @@ def prepare_context(settings: Settings, request: ChatRequest) -> PreparedContext
         raise ContextWindowError("Response length exceeds the slot context. Choose fewer tokens.")
     messages = list(request.messages)
     summary = request.summary
+    continuation = request.continuation
     compacted = False
     with httpx.Client(
         timeout=settings.timeout,
@@ -169,7 +193,16 @@ def prepare_context(settings: Settings, request: ChatRequest) -> PreparedContext
             "Authorization": "Bearer " + settings.api_key.get_secret_value(),
         },
     ) as client:
-        count = token_count(client, settings, model_messages(messages, summary))
+
+        def count_active() -> int:
+            turns = model_messages(messages, summary)
+            return (
+                token_count(client, settings, turns, continuation)
+                if continuation
+                else token_count(client, settings, turns)
+            )
+
+        count = count_active()
         if (count > int(budget * 0.8) or len(messages) >= MAX_CONTEXT_MESSAGES) and len(
             messages
         ) > 1:
@@ -179,7 +212,7 @@ def prepare_context(settings: Settings, request: ChatRequest) -> PreparedContext
             summary = compact_older(client, settings, summary, messages[:cutoff])
             messages = messages[cutoff:]
             compacted = True
-            count = token_count(client, settings, model_messages(messages, summary))
+            count = count_active()
         while count > budget and len(messages) > 1:
             cutoff = 1
             while cutoff < len(messages) - 1 and messages[cutoff].role != "user":
@@ -187,7 +220,26 @@ def prepare_context(settings: Settings, request: ChatRequest) -> PreparedContext
             summary = compact_older(client, settings, summary, messages[:cutoff])
             messages = messages[cutoff:]
             compacted = True
-            count = token_count(client, settings, model_messages(messages, summary))
+            count = count_active()
+        while count > budget and len(continuation) > MIN_CONTINUATION_TAIL:
+            keep = max(
+                MIN_CONTINUATION_TAIL,
+                min(
+                    CONTINUATION_TAIL_CHARACTERS,
+                    len(continuation) // 2,
+                ),
+            )
+            head, continuation = continuation[:-keep], continuation[-keep:]
+            summary = compact_older(
+                client,
+                settings,
+                summary,
+                [
+                    Message(role="assistant", content=head),
+                ],
+            )
+            compacted = True
+            count = count_active()
     if count > budget:
         raise ContextWindowError(
             "This message is too long. Shorten it or choose fewer response tokens."
@@ -198,4 +250,5 @@ def prepare_context(settings: Settings, request: ChatRequest) -> PreparedContext
         prompt_tokens=count,
         available_tokens=budget,
         compacted=compacted,
+        continuation=continuation,
     )

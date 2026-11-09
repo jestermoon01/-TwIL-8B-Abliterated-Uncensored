@@ -1,0 +1,14 @@
+{
+  "numbers": "1 through 80, exact order with no duplicate prefix",
+  "single_reply": true,
+  "finished_reason": "stop",
+  "saved_after_reload": true,
+  "code_test": "Six-method Python class finished after two continuations in one fenced block; AST parsing passed, code not executed",
+  "regressions": [
+    "automatic continuation",
+    "four retry cap",
+    "manual continue after reload",
+    "interrupted stream preserved",
+    "Stop cancels retries"
+  ]
+}

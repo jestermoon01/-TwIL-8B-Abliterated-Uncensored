@@ -5,6 +5,45 @@ Local endpoint: `http://127.0.0.1:8080/v1`.
 The listener is bound to `127.0.0.1`; access is limited to this PC.
 Model alias: `twil-8b`. The API key is stored only in the ignored `.env` file.
 
+## Finishing long answers
+
+The browser enables **Finish long answers automatically** by default. When the
+engine reports `finish_reason=length`, the app resumes from the unfinished text
+and appends the next segment to the same assistant reply. It uses the installed
+model's rendered chat template plus the exact partial answer with the completion
+endpoint, avoiding a new user turn or a "start over" instruction. Markdown code
+blocks and saved transcripts keep the joined answer.
+
+There are at most four automatic continuations per attempt. After that, or when
+auto-finish is disabled, **Continue response** resumes the saved partial reply.
+Stop cancels further requests. Interrupted streams preserve their text and offer
+Continue instead of claiming completion. Older saved replies without completion
+metadata also offer a Continue button on the latest assistant answer.
+
+Before each segment, token accounting includes the unfinished answer and reserves
+space for the next output. If needed, earlier context and the older part of a
+long answer are summarized while its exact final text is retained as the prefix.
+The full answer remains visible and saved. The selected response size controls
+each segment, rather than the total auto-finished answer. This recovers output
+token-limit cuts; it cannot guarantee that every model-generated answer is
+semantically complete or that very long requests fit the context window.
+
+Validated with the running Docker model: an 80-number list continued after a
+128-token limit with no duplicate prefix; a six-method Python class continued
+twice, finished in one fenced block, and passed Python syntax parsing without
+executing the generated code. Regression checks cover automatic continuation,
+the retry cap, manual continuation after reload, interrupted streams, and Stop.
+
+```powershell
+uv run pytest
+$env:TWIL_BROWSER_EXECUTABLE = 'C:/Program Files/BraveSoftware/Brave-Browser/Application/brave.exe'
+uv run --with playwright==1.64.1 pytest -m smoke tests/test_browser_finish.py
+```
+
+The optional browser tests require the local interface and an installed Chromium
+browser. They mock inference requests. Default tests exclude `smoke`; the current
+quality gate passes 21 unit/integration tests plus 5 browser smoke tests.
+
 ## Docker and conversations
 
 The current deployment runs **both the CUDA model server and chat interface in

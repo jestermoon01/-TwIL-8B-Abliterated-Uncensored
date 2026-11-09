@@ -9,9 +9,15 @@ import httpx
 from pydantic import ValidationError
 
 from twil_deploy.config import Settings
-from twil_deploy.context import ChatRequest, ContextWindowError, model_messages, prepare_context
+from twil_deploy.context import (
+    ChatRequest,
+    ContextWindowError,
+    model_messages,
+    prepare_context,
+    render_prompt,
+)
 
-MAX_REQUEST_BYTES = 64_000
+MAX_REQUEST_BYTES = 128_000
 
 
 class LocalHTTPServer(ThreadingHTTPServer):
@@ -117,35 +123,54 @@ def handler_for(settings: Settings) -> type[BaseHTTPRequestHandler]:
             """Relay a validated generation request without buffering the response."""
             payload = request.model_dump() | {"model": settings.alias, "stream": True}
             payload.pop("summary")
+            payload.pop("continuation")
             payload["messages"] = model_messages(request.messages, request.summary)
             streaming = False
             try:
-                with (
-                    httpx.Client(timeout=settings.timeout) as client,
-                    client.stream(
-                        "POST",
-                        settings.base_url + "/chat/completions",
-                        json=payload,
-                        headers={"Authorization": "Bearer " + settings.api_key.get_secret_value()},
-                    ) as response,
-                ):
-                    if response.is_error:
-                        self.reply(
-                            response.status_code,
-                            json.dumps(
-                                {"error": "Request rejected. Try a new chat or fewer tokens."}
-                            ).encode(),
-                            "application/json",
+                with httpx.Client(
+                    timeout=settings.timeout,
+                    headers={
+                        "Authorization": "Bearer " + settings.api_key.get_secret_value(),
+                    },
+                ) as client:
+                    endpoint = "/chat/completions"
+                    if request.continuation:
+                        prompt = (
+                            render_prompt(
+                                client,
+                                settings,
+                                model_messages(
+                                    request.messages,
+                                    request.summary,
+                                ),
+                            )
+                            + request.continuation
                         )
-                        return
-                    self.send_response(200)
-                    self.send_header("Content-Type", "text/event-stream")
-                    self.send_header("Cache-Control", "no-store")
-                    self.end_headers()
-                    streaming = True
-                    for chunk in response.iter_bytes():
-                        self.wfile.write(chunk)
-                        self.wfile.flush()
+                        payload.pop("messages")
+                        payload["prompt"] = prompt
+                        endpoint = "/completions"
+                    with client.stream(
+                        "POST",
+                        settings.base_url + endpoint,
+                        json=payload,
+                    ) as response:
+                        if response.is_error:
+                            self.reply(
+                                response.status_code,
+                                json.dumps(
+                                    {"error": "Request rejected. Try fewer tokens."}
+                                ).encode(),
+                                "application/json",
+                            )
+                            return
+                        self.send_response(200)
+                        self.send_header("Content-Type", "text/event-stream")
+                        self.send_header("Cache-Control", "no-store")
+                        self.end_headers()
+                        streaming = True
+                        for chunk in response.iter_bytes():
+                            self.wfile.write(chunk)
+                            self.wfile.flush()
             except ConnectionError:
                 logging.getLogger(__name__).info("Chat stream cancelled by browser")
             except httpx.TransportError:

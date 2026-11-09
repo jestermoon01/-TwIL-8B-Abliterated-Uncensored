@@ -77,3 +77,25 @@ def test_offline_server_returns_clear_error(ui_server: tuple[str, Settings]) -> 
     with pytest.raises(HTTPError) as error:
         urlopen(chat_request(url), timeout=5)  # noqa: S310
     assert error.value.code == 503
+
+
+@respx.mock
+def test_continuation_uses_exact_rendered_prefix(ui_server: tuple[str, Settings]) -> None:
+    url, settings = ui_server
+    respx.post(settings.base_url.removesuffix("/v1") + "/apply-template").mock(
+        return_value=httpx.Response(200, json={"prompt": "actual model template:"})
+    )
+    event = 'data: {"choices":[{"text":" finished.","finish_reason":"stop"}]}\n\n'
+    upstream = respx.post(settings.base_url + "/completions").mock(
+        return_value=httpx.Response(200, text=event)
+    )
+    request = chat_request(url)
+    request.data = json.dumps(
+        {"messages": [{"role": "user", "content": "Explain"}], "continuation": "This was"}
+    ).encode()
+    with urlopen(request, timeout=5) as response:  # noqa: S310 -- loopback test server
+        assert response.read().decode() == event
+    payload = json.loads(upstream.calls[0].request.content)
+    assert payload["prompt"] == "actual model template:This was"
+    assert "continuation" not in payload
+    assert "messages" not in payload
