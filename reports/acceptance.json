@@ -1,0 +1,226 @@
+{
+  "smoke": {
+    "health": "ok",
+    "unauthenticated": "401",
+    "text": "Hello!",
+    "stream": "Hello!"
+  },
+  "samples": [
+    {
+      "prompt_id": "greeting",
+      "text": "Hello!",
+      "timings": {
+        "cache_n": 20,
+        "prompt_n": 1,
+        "prompt_ms": 11.106,
+        "prompt_per_token_ms": 11.106,
+        "prompt_per_second": 90.04141905276427,
+        "predicted_n": 3,
+        "predicted_ms": 22.208,
+        "predicted_per_token_ms": 7.402666666666666,
+        "predicted_per_second": 135.0864553314121
+      }
+    },
+    {
+      "prompt_id": "arithmetic",
+      "text": "391",
+      "timings": {
+        "cache_n": 28,
+        "prompt_n": 1,
+        "prompt_ms": 11.38,
+        "prompt_per_token_ms": 11.38,
+        "prompt_per_second": 87.87346221441125,
+        "predicted_n": 2,
+        "predicted_ms": 10.874,
+        "predicted_per_token_ms": 5.437,
+        "predicted_per_second": 183.9249586168843
+      }
+    },
+    {
+      "prompt_id": "instruction",
+      "text": "local server ready",
+      "timings": {
+        "cache_n": 23,
+        "prompt_n": 1,
+        "prompt_ms": 11.354,
+        "prompt_per_token_ms": 11.354,
+        "prompt_per_second": 88.07468733485997,
+        "predicted_n": 4,
+        "predicted_ms": 32.745,
+        "predicted_per_token_ms": 8.18625,
+        "predicted_per_second": 122.1560543594442
+      }
+    },
+    {
+      "prompt_id": "greeting",
+      "text": "Hello!",
+      "timings": {
+        "cache_n": 20,
+        "prompt_n": 1,
+        "prompt_ms": 11.256,
+        "prompt_per_token_ms": 11.256,
+        "prompt_per_second": 88.84150675195451,
+        "predicted_n": 3,
+        "predicted_ms": 21.785,
+        "predicted_per_token_ms": 7.261666666666667,
+        "predicted_per_second": 137.7094330961671
+      }
+    },
+    {
+      "prompt_id": "arithmetic",
+      "text": "391",
+      "timings": {
+        "cache_n": 28,
+        "prompt_n": 1,
+        "prompt_ms": 11.065,
+        "prompt_per_token_ms": 11.065,
+        "prompt_per_second": 90.37505648441031,
+        "predicted_n": 2,
+        "predicted_ms": 10.806,
+        "predicted_per_token_ms": 5.403,
+        "predicted_per_second": 185.08236165093467
+      }
+    },
+    {
+      "prompt_id": "instruction",
+      "text": "local server ready",
+      "timings": {
+        "cache_n": 23,
+        "prompt_n": 1,
+        "prompt_ms": 11.328,
+        "prompt_per_token_ms": 11.328,
+        "prompt_per_second": 88.2768361581921,
+        "predicted_n": 4,
+        "predicted_ms": 32.658,
+        "predicted_per_token_ms": 8.1645,
+        "predicted_per_second": 122.4814746769551
+      }
+    },
+    {
+      "prompt_id": "greeting",
+      "text": "Hello!",
+      "timings": {
+        "cache_n": 20,
+        "prompt_n": 1,
+        "prompt_ms": 11.325,
+        "prompt_per_token_ms": 11.325,
+        "prompt_per_second": 88.30022075055189,
+        "predicted_n": 3,
+        "predicted_ms": 21.828,
+        "predicted_per_token_ms": 7.276,
+        "predicted_per_second": 137.43815283122595
+      }
+    },
+    {
+      "prompt_id": "arithmetic",
+      "text": "391",
+      "timings": {
+        "cache_n": 28,
+        "prompt_n": 1,
+        "prompt_ms": 11.293,
+        "prompt_per_token_ms": 11.293,
+        "prompt_per_second": 88.55042946958294,
+        "predicted_n": 2,
+        "predicted_ms": 10.916,
+        "predicted_per_token_ms": 5.458,
+        "predicted_per_second": 183.21729571271527
+      }
+    },
+    {
+      "prompt_id": "instruction",
+      "text": "local server ready",
+      "timings": {
+        "cache_n": 23,
+        "prompt_n": 1,
+        "prompt_ms": 11.314,
+        "prompt_per_token_ms": 11.314,
+        "prompt_per_second": 88.386070355312,
+        "predicted_n": 4,
+        "predicted_ms": 32.804,
+        "predicted_per_token_ms": 8.201,
+        "predicted_per_second": 121.93634922570418
+      }
+    },
+    {
+      "prompt_id": "greeting",
+      "text": "Hello!",
+      "timings": {
+        "cache_n": 20,
+        "prompt_n": 1,
+        "prompt_ms": 11.301,
+        "prompt_per_token_ms": 11.301,
+        "prompt_per_second": 88.48774444739404,
+        "predicted_n": 3,
+        "predicted_ms": 21.827,
+        "predicted_per_token_ms": 7.275666666666667,
+        "predicted_per_second": 137.4444495349796
+      }
+    },
+    {
+      "prompt_id": "arithmetic",
+      "text": "391",
+      "timings": {
+        "cache_n": 28,
+        "prompt_n": 1,
+        "prompt_ms": 11.495,
+        "prompt_per_token_ms": 11.495,
+        "prompt_per_second": 86.99434536755112,
+        "predicted_n": 2,
+        "predicted_ms": 11.14,
+        "predicted_per_token_ms": 5.57,
+        "predicted_per_second": 179.53321364452424
+      }
+    },
+    {
+      "prompt_id": "instruction",
+      "text": "local server ready",
+      "timings": {
+        "cache_n": 23,
+        "prompt_n": 1,
+        "prompt_ms": 11.293,
+        "prompt_per_token_ms": 11.293,
+        "prompt_per_second": 88.55042946958294,
+        "predicted_n": 4,
+        "predicted_ms": 32.621,
+        "predicted_per_token_ms": 8.15525,
+        "predicted_per_second": 122.62039790319119
+      }
+    }
+  ],
+  "memory_mib": [
+    7427,
+    7424,
+    7424,
+    7424,
+    7424,
+    7424,
+    7424,
+    7424,
+    7424,
+    7424,
+    7424,
+    7423,
+    7423
+  ],
+  "memory_span_mib": 4,
+  "median_generation_tokens_per_second": 137.44130118310278,
+  "longer_generation": {
+    "text": "Quantizing a language model reduces GPU memory by converting the model's weights from high-precision floating-point numbers (typically 32-bit or 16-bit) to lower-precision integer or lower-bit representations (such as 8-bit, 4-bit, or even 2-bit). Each weight in the model originally occupies more memory\u2014for example, a 32-bit float uses 4 bytes per value, while an 8-bit integer uses only 1 byte. By reducing the bit depth, the total number of bytes required to store the model's parameters decreases significantly. For instance, an",
+    "finish_reason": "length",
+    "timings": {
+      "cache_n": 8,
+      "prompt_n": 22,
+      "prompt_ms": 19.78,
+      "prompt_per_token_ms": 0.8990909090909092,
+      "prompt_per_second": 1112.2345803842265,
+      "predicted_n": 128,
+      "predicted_ms": 1391.808,
+      "predicted_per_token_ms": 10.8735,
+      "predicted_per_second": 91.96670805168529
+    }
+  },
+  "external_lan_test": "not requested; loopback listener only",
+  "external_public_test": "loopback listener verified; no external routing claim",
+  "deployment_scope": "local to this PC, per user preference",
+  "verified_listener": "127.0.0.1:8080"
+}
