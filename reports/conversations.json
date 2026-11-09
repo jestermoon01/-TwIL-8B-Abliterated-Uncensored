@@ -1,0 +1,18 @@
+{
+  "compacted": true,
+  "summary": "Project Cedar is a project with a green interface that runs locally in Docker. The conversation consists of repeated user and assistant messages stating this fact. No other goals, names, facts, constraints, decisions, code identifiers, or unresolved questions are present.",
+  "retained_turns": 3,
+  "prompt_tokens": 1056,
+  "available_tokens": 3456,
+  "browser_checks": [
+    "save",
+    "reload",
+    "new",
+    "switch",
+    "rename",
+    "delete",
+    "export",
+    "automatic summarization",
+    "full transcript retained"
+  ]
+}

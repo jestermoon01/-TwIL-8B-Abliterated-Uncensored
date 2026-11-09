@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>TwIL — Local chat</title>
 <link rel="stylesheet" href="/assets/markdown.css">
+<link rel="stylesheet" href="/assets/conversations.css">
 <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='10' fill='%233b6553'/%3E%3Ctext x='13' y='29' fill='white' font-size='30' font-family='Georgia'%3Et%3C/text%3E%3C/svg%3E">
 <style>
 :root{color-scheme:light;--paper:#f5f4ee;--ink:#252b28;--muted:#747b73;--line:#dddfd5;--green:#3b6553;--sidebar:#222d27}
@@ -16,14 +17,16 @@
  <aside class="sidebar" aria-label="Chat settings">
   <div class="brand"><div class="mark" aria-hidden="true">t</div><div><strong>TwIL</strong><div class="eyebrow">Local intelligence</div></div></div>
   <button class="new-chat" id="newChat">New conversation <span aria-hidden="true">＋</span></button>
+  <section class="chat-section"><div class="eyebrow">Conversations</div><div class="chat-list" id="chatList"></div><button class="export-chat" id="exportChat">Export current chat</button></section>
   <div class="model-card"><div class="eyebrow">Active model</div><strong>TwIL 8B</strong><span class="pill">Q5_K_M</span><p>Running on your RTX 5070.<br>Conversations stay on this PC.</p></div>
   <div class="settings"><label for="tokens">Response length<select id="tokens"><option value="128">Brief · 128 tokens</option><option value="512" selected>Balanced · 512 tokens</option><option value="1024">Detailed · 1024 tokens</option><option value="2048">Extended · 2048 tokens</option></select></label><label for="temperature"><span class="range-row"><span>Creativity</span><output id="tempValue">0.7</output></span></label><input id="temperature" type="range" min="0" max="1.5" step="0.1" value="0.7" aria-label="Creativity"></div>
-  <div class="sidebar-foot"><strong>Private by design</strong>No cloud. No chat history saved.<br>Your model, on your machine.</div>
+  <div class="sidebar-foot"><strong>Private by design</strong>Saved in this browser.<br>Your model, on your machine.</div>
  </aside>
  <main class="main">
-  <header class="topbar"><div class="breadcrumb">Playground <span>/ &nbsp; New conversation</span><button class="mobile-clear" id="mobileClear">New chat</button></div><div class="status" id="status" role="status"><span class="dot"></span><span id="statusText">Connecting</span></div></header>
+  <header class="topbar"><div class="breadcrumb">Playground <span id="chatTitle">New conversation</span><select class="mobile-picker" id="chatPicker" aria-label="Saved conversations"></select><button class="mobile-clear" id="mobileClear">New chat</button></div><div class="status" id="status" role="status"><span class="dot"></span><span id="statusText">Connecting</span></div></header>
   <section class="conversation" id="conversation" aria-label="Conversation">
    <div class="welcome" id="welcome"><div class="welcome-badge">● &nbsp; ON YOUR MACHINE</div><h1>A little curiosity.<br>A conversation away.</h1><p class="intro">A quiet space to try your local model. Ask a question, work through an idea, or put its reasoning to the test.</p><div class="suggestions"><button class="suggestion" data-prompt="Explain how language model quantization works in simple terms."><span class="icon">↗</span><strong>Understand something</strong><small>Make a complex idea feel simple.</small></button><button class="suggestion" data-prompt="Write a short Python function that checks whether a word is a palindrome. Explain it briefly."><span class="icon">{ }</span><strong>Write a little code</strong><small>Start with a small Python example.</small></button><button class="suggestion" data-prompt="Suggest five creative names for a cozy neighborhood coffee shop."><span class="icon">✳</span><strong>Explore an idea</strong><small>Find a fresh angle on something.</small></button></div></div>
+   <details id="memoryInfo" class="memory-info empty"><summary id="memoryLabel">Conversation memory</summary><p id="memoryText"></p></details>
    <div class="messages" id="messages" role="log" aria-label="Chat messages" aria-live="polite" aria-relevant="additions"></div>
   </section>
   <div class="composer-wrap"><form id="chatForm" class="composer"><textarea id="prompt" rows="2" maxlength="12000" placeholder="Ask something. Start anywhere." aria-label="Your message" required></textarea><div class="composer-bottom"><span class="composer-note">ENTER TO SEND · SHIFT + ENTER FOR A NEW LINE</span><button type="submit" id="send" class="send">Send ↑</button></div></form><div class="footer"><span>TwIL can make mistakes. Check important answers.</span><span id="metrics" aria-live="polite">Local session</span></div></div>
@@ -50,60 +53,7 @@ function renderAnswer(element,text){
   toolbar.append(language,copy);pre.replaceWith(block);block.append(toolbar,pre);
  }
 }
-const history = [];
-let controller = null;
-let busy = false;
-let online = false;
-$('temperature').addEventListener('input', () => $('tempValue').textContent = $('temperature').value);
-function scrollChat(){ const el=$('conversation'); el.scrollTop=el.scrollHeight; }
-function message(role,text){
- const el=document.createElement('article'); el.className='message '+role;
- const label=document.createElement('div'); label.className='label';label.textContent=role==='user'?'You':'TwIL';
- const content=document.createElement('div');content.className=role==='assistant'?'content prose':'content';content.textContent=text;
- el.append(label,content);$('messages').append(el);scrollChat();return {el,content};
-}
-function reset(){if(busy)return;history.length=0;$('messages').replaceChildren();$('welcome').classList.remove('empty');$('metrics').textContent='Local session';$('prompt').focus();}
-$('newChat').onclick=reset;$('mobileClear').onclick=reset;
-document.querySelectorAll('[data-prompt]').forEach(button=>button.onclick=()=>{if(busy)return;$('prompt').value=button.dataset.prompt;$('prompt').focus();});
-async function health(){
- try{const r=await fetch('/api/health',{cache:'no-store'});online=r.ok;}catch{online=false;}
- $('status').className='status '+(online?'online':'offline');$('statusText').textContent=online?'Model online':'Model offline';
-}
-function setBusy(value){busy=value;$('send').textContent=value?'Stop ■':'Send ↑';$('send').classList.toggle('stop',value);$('prompt').disabled=value;$('newChat').disabled=value;$('mobileClear').disabled=value;}
-$('prompt').addEventListener('keydown',event=>{if(event.key==='Enter'&&!event.shiftKey&&!event.isComposing){event.preventDefault();if(!busy)$('chatForm').requestSubmit();}});
-$('send').addEventListener('click',event=>{if(busy){event.preventDefault();controller.abort();}});
-$('chatForm').addEventListener('submit',async event=>{
- event.preventDefault();if(busy)return;
- const text=$('prompt').value.trim();if(!text)return;
- if(!online){await health();if(!online){$('metrics').textContent='Model offline — start it with “uv run twil-deploy serve”.';return;}}
- if(history.length>=38){$('metrics').textContent='This conversation is full. Start a new chat to continue.';return;}
- $('welcome').classList.add('empty');message('user',text);history.push({role:'user',content:text});$('prompt').value='';
- const answer=message('assistant','Thinking…');answer.content.classList.add('pending');setBusy(true);controller=new AbortController();
- const started=performance.now();let output='';let tokenEvents=0;let finishReason='';let succeeded=false;
- try{
-  const response=await fetch('/api/chat',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({messages:history,max_tokens:Number($('tokens').value),temperature:Number($('temperature').value)}),signal:controller.signal});
-  if(!response.ok){let body;try{body=await response.json();}catch{}throw new Error(body?.error||'The model could not complete this request.');}
-  const reader=response.body.getReader();const decoder=new TextDecoder();let buffer='';
-  function consume(frame){
-   for(const line of frame.split('\n')){if(!line.startsWith('data:'))continue;const raw=line.slice(5).trim();if(!raw||raw==='[DONE]')continue;
-    const data=JSON.parse(raw);if(data.error)throw new Error(data.error);const choice=data.choices?.[0];if(choice?.finish_reason)finishReason=choice.finish_reason;
-    const delta=choice?.delta?.content;if(delta){output+=delta;tokenEvents++;answer.content.classList.remove('pending');renderAnswer(answer.content,output);scrollChat();}
-   }
-  }
-  while(true){const {value,done}=await reader.read();buffer+=decoder.decode(value||new Uint8Array(),{stream:!done});buffer=buffer.replace(/\r\n/g,'\n');let cut;while((cut=buffer.indexOf('\n\n'))!==-1){consume(buffer.slice(0,cut));buffer=buffer.slice(cut+2);}if(done){if(buffer.trim())consume(buffer);break;}}
-  if(!output)throw new Error('The model returned no visible text. Try a new conversation.');succeeded=true;
- }catch(error){
-  if(error.name==='AbortError'){if(!output)answer.content.textContent='Response stopped.';}
-  else{answer.el.classList.add('error');answer.content.textContent=output?output+'\n\n'+error.message:error.message;}
- }finally{
-  answer.content.classList.remove('pending');
-  if(output){history.push({role:'assistant',content:output});const copy=document.createElement('button');copy.className='copy';copy.textContent='Copy response';copy.onclick=async()=>{try{await navigator.clipboard.writeText(output);copy.textContent='Copied';setTimeout(()=>copy.textContent='Copy response',1500);}catch{copy.textContent='Select the text to copy';}};answer.el.append(copy);}
-  else{history.pop();$('prompt').value=text;}
-  const elapsed=((performance.now()-started)/1000).toFixed(1);$('metrics').textContent=output?`${elapsed}s · ${tokenEvents} text chunks${finishReason==='length'?' · Response limit reached':succeeded?' · Complete':' · Stopped'}`:'Ready to retry';
-  setBusy(false);controller=null;$('prompt').focus();scrollChat();
- }
-});
-health();setInterval(health,15000);
 </script>
+<script src="/assets/chat.js"></script>
 </body>
 </html>

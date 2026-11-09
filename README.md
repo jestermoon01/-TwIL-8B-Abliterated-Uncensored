@@ -5,6 +5,77 @@ Local endpoint: `http://127.0.0.1:8080/v1`.
 The listener is bound to `127.0.0.1`; access is limited to this PC.
 Model alias: `twil-8b`. The API key is stored only in the ignored `.env` file.
 
+## Docker and conversations
+
+The current deployment runs **both the CUDA model server and chat interface in
+Docker Compose**. Docker Desktop must use Linux containers with WSL2 GPU support.
+The model is mounted read-only; it is never copied into the UI image. Both
+published ports bind to `127.0.0.1`. Native Windows servers should be stopped
+before starting Compose, to avoid port conflicts and duplicate GPU allocations.
+
+```powershell
+docker compose up --build --detach --wait
+docker compose ps
+docker compose logs --tail 30 model
+docker compose down
+```
+
+Open **http://127.0.0.1:8081**. The sidebar supports new, switch, rename, delete,
+and export. Chats and their summaries are saved in this browser's local storage
+on this PC. They survive page reloads and container restarts. Clearing browser
+storage, using another browser profile or changing the URL origin does not
+preserve that browser's chats; use Export for backups. Older page sessions from
+before saved chats were implemented were not retroactively saved.
+
+Before each answer, `/api/context` applies the actual model chat template and
+tokenizer. The input budget is the slot's context minus requested output tokens
+and a 128-token margin. At 80% of that budget, or 38 active messages, older turns
+are summarized with the same local model. Recent turns remain verbatim where
+they fit, and the newest user turn is retained. Summarization batches also obey
+the model's context window. The compacted memory is visible in an expandable
+notice; the **full transcript remains saved and visible**. If a single message
+cannot fit, the UI asks for a shorter message instead of silently cutting it.
+Summaries can omit details; inspect the memory or refer to the full transcript
+when exact wording matters.
+
+The Docker model image is pinned to **b10015**, revision
+`12127defda4f41b7679cb2477a4b0d65ee6a0c8f`, digest
+`sha256:bfd66df75691abeda48ade76803dbd9d9c0194aab874207715e48e099967c67b`.
+Python 3.12.16 and uv 0.13.7 base images are digest-pinned in `Dockerfile`.
+The UI runs as an unprivileged user. Docker logs rotate and both services have
+health checks and restart policies. The existing `.env` provides the same key to
+the UI and model server; `.dockerignore` excludes it from image builds.
+
+For a clean Docker-only rebuild, create `.env` from `.env.example` and replace
+the example key with a randomly generated value of at least 32 characters. Then:
+
+```powershell
+docker compose build ui
+docker compose --profile tools run --rm download
+docker compose up --detach --wait
+```
+
+The one-shot download service checks the pinned SHA-256 and writes into the
+ignored `models/` directory. It runs as root only to populate the bind mount;
+the long-running UI uses its unprivileged image user. No browser chats or API
+keys are committed or included in images.
+
+Validated: both Docker services healthy; 41/41 layers offloaded; health, API-key
+enforcement, streaming and twelve sequential requests pass. Total VRAM was
+7,426 MiB with no span over that run; a 128-token response measured 90.11 tokens/s.
+These are short local measurements, not broad benchmarks. Browser checks cover
+save/reload, switch, rename, delete, export, and a real automatic summary with
+1,056 prompt tokens fitting its 3,456-token input budget. See
+[reports/conversations.json](reports/conversations.json) and
+[reports/acceptance.json](reports/acceptance.json). Ruff, strict mypy and 17 tests pass.
+
+Docker references: [GPU support](https://docs.docker.com/desktop/features/gpu/),
+[Compose GPU reservations](https://docs.docker.com/compose/how-tos/gpu-support/),
+[official llama.cpp images](https://github.com/ggml-org/llama.cpp/blob/master/docs/docker.md).
+
+The sections below retain the native Windows deployment commands and its
+original measurements as an alternative to Compose.
+
 ## Verified results
 
 - Q5_K_M artifact downloaded and SHA-256 verified.
@@ -40,7 +111,7 @@ would also require changing `TWIL_HOST` and restarting the server.
 Open **http://127.0.0.1:8081** in your browser. The interface is running locally
 and authenticates to the model automatically; no key needs to be pasted into the
 page. It supports streamed answers, stop, new conversation, copy, response-length
-selection and temperature control. Conversations are kept in page memory only.
+selection and temperature control. Conversations are saved in browser local storage.
 
 Assistant answers render Markdown with styled headings, emphasis, lists, quotes,
 tables, links, inline code and fenced code blocks with copy buttons. Markdown-it
@@ -156,5 +227,5 @@ uv run pytest
 ```
 
 No model weights, binaries, logs, environments or local credentials are tracked.
-The generated lockfile and deployment tooling are ready for version control;
-no commit was created.
+The repository contains the lockfile, source, manifests and reproducible deployment
+commands. Model weights, keys and runtime logs stay outside version control.

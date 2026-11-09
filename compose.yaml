@@ -1,0 +1,91 @@
+name: twil
+services:
+  download:
+    profiles: [tools]
+    build: .
+    image: twil-ui:0.2.0
+    user: "0:0"
+    environment:
+      TWIL_API_KEY: ${TWIL_API_KEY:?Set TWIL_API_KEY in .env}
+      TWIL_MODELS_DIR: /models
+      HF_HUB_DISABLE_XET: "1"
+    volumes:
+      - ./models:/models
+    command: [twil-deploy, download]
+  model:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda13-b10015@sha256:bfd66df75691abeda48ade76803dbd9d9c0194aab874207715e48e099967c67b
+    restart: unless-stopped
+    environment:
+      LLAMA_API_KEY: ${TWIL_API_KEY:?Set TWIL_API_KEY in .env}
+    command:
+      - --model
+      - /models/${TWIL_MODEL_FILENAME:-TwIL-8B-Abliterated-Uncensored.Q5_K_M.gguf}
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8080"
+      - --n-gpu-layers
+      - "99"
+      - --ctx-size
+      - ${TWIL_CTX_SIZE:-8192}
+      - --parallel
+      - ${TWIL_PARALLEL:-2}
+      - --jinja
+      - --flash-attn
+      - "on"
+      - --chat-template-kwargs
+      - '{"enable_thinking":false}'
+      - --alias
+      - twil-8b
+      - --log-verbosity
+      - "4"
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./models:/models:ro
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    healthcheck:
+      test: [CMD, curl, --fail, --silent, http://127.0.0.1:8080/health]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 60s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "3"
+  ui:
+    build: .
+    image: twil-ui:0.2.0
+    restart: unless-stopped
+    init: true
+    depends_on:
+      model:
+        condition: service_healthy
+    environment:
+      TWIL_API_KEY: ${TWIL_API_KEY:?Set TWIL_API_KEY in .env}
+      TWIL_MODEL_BASE_URL: http://model:8080/v1
+      TWIL_UI_HOST: 0.0.0.0
+      TWIL_UI_PORT: "8081"
+      TWIL_CTX_SIZE: ${TWIL_CTX_SIZE:-8192}
+      TWIL_PARALLEL: ${TWIL_PARALLEL:-2}
+      TWIL_SUMMARY_TOKENS: ${TWIL_SUMMARY_TOKENS:-384}
+    ports:
+      - "127.0.0.1:8081:8081"
+    healthcheck:
+      test: [CMD, python, -c, "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8081/api/health', timeout=5)"]
+      interval: 15s
+      timeout: 8s
+      retries: 5
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: "3"

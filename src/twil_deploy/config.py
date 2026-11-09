@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     enable_thinking: bool = False
     log_verbosity: int = Field(default=4, ge=0, le=5)
     ui_port: int = Field(default=8081, ge=1, le=65535)
+    ui_host: str = "127.0.0.1"
+    model_base_url: str | None = None
+    context_margin: int = Field(default=128, ge=32)
+    summary_tokens: int = Field(default=384, ge=64, le=768)
 
     @field_validator("api_key")
     @classmethod
@@ -49,5 +53,7 @@ class Settings(BaseSettings):
     @property
     def base_url(self) -> str:
         """Probe wildcard listeners through loopback."""
+        if self.model_base_url:
+            return self.model_base_url.rstrip("/")
         host = "127.0.0.1" if self.host == "0.0.0.0" else self.host  # noqa: S104
         return f"http://{host}:{self.port}/v1"

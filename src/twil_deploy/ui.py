@@ -4,12 +4,12 @@ import json
 import logging
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Literal
 
 import httpx
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import ValidationError
 
 from twil_deploy.config import Settings
+from twil_deploy.context import ChatRequest, ContextWindowError, model_messages, prepare_context
 
 MAX_REQUEST_BYTES = 64_000
 
@@ -18,21 +18,6 @@ class LocalHTTPServer(ThreadingHTTPServer):
     """Prevent overlapping Windows listeners from serving stale interface assets."""
 
     allow_reuse_address = False
-
-
-class Message(BaseModel):
-    """A bounded conversation message."""
-
-    role: Literal["user", "assistant"]
-    content: str = Field(min_length=1, max_length=16000)
-
-
-class ChatRequest(BaseModel):
-    """The small set of generation controls exposed to the browser."""
-
-    messages: list[Message] = Field(min_length=1, max_length=40)
-    max_tokens: int = Field(default=512, ge=1, le=2048)
-    temperature: float = Field(default=0.7, ge=0, le=2)
 
 
 def handler_for(settings: Settings) -> type[BaseHTTPRequestHandler]:
@@ -44,6 +29,8 @@ def handler_for(settings: Settings) -> type[BaseHTTPRequestHandler]:
         "/assets/markdown-it.min.js": (static / "vendor/markdown-it.min.js", "text/javascript"),
         "/assets/purify.min.js": (static / "vendor/purify.min.js", "text/javascript"),
         "/assets/markdown.css": (static / "markdown.css", "text/css"),
+        "/assets/chat.js": (static / "chat.js", "text/javascript"),
+        "/assets/conversations.css": (static / "conversations.css", "text/css"),
     }
 
     class Handler(BaseHTTPRequestHandler):
@@ -91,7 +78,7 @@ def handler_for(settings: Settings) -> type[BaseHTTPRequestHandler]:
             """Validate a same-origin request and forward SSE with server-side authentication."""
             if not self.valid_host():
                 return
-            if self.path != "/api/chat":
+            if self.path not in {"/api/chat", "/api/context"}:
                 self.reply(404, b"Not found", "text/plain")
                 return
             origin = self.headers.get("Origin")
@@ -111,11 +98,26 @@ def handler_for(settings: Settings) -> type[BaseHTTPRequestHandler]:
                     400, b'{"error":"Invalid or oversized chat request"}', "application/json"
                 )
                 return
-            self.forward(request)
+            if self.path == "/api/context":
+                try:
+                    context = prepare_context(settings, request)
+                    self.reply(200, context.model_dump_json().encode(), "application/json")
+                except ContextWindowError as error:
+                    self.reply(400, json.dumps({"error": str(error)}).encode(), "application/json")
+                except (httpx.HTTPError, ValidationError):
+                    self.reply(
+                        503,
+                        b'{"error":"Context preparation failed; chat preserved"}',
+                        "application/json",
+                    )
+            else:
+                self.forward(request)
 
         def forward(self, request: ChatRequest) -> None:
             """Relay a validated generation request without buffering the response."""
             payload = request.model_dump() | {"model": settings.alias, "stream": True}
+            payload.pop("summary")
+            payload["messages"] = model_messages(request.messages, request.summary)
             streaming = False
             try:
                 with (
@@ -161,5 +163,5 @@ def handler_for(settings: Settings) -> type[BaseHTTPRequestHandler]:
 
 def run_ui(settings: Settings) -> None:
     """Serve the local chat interface until interrupted."""
-    with LocalHTTPServer(("127.0.0.1", settings.ui_port), handler_for(settings)) as server:
+    with LocalHTTPServer((settings.ui_host, settings.ui_port), handler_for(settings)) as server:
         server.serve_forever()
